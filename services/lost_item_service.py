@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
-from database.mongodb import get_database, is_connected
+from database.mongodb import mongodb
 from models.lost_item import LostItemCreate, LostItemResponse, LostItemFilters
 from services.cache_service import cache_service
 from config.settings import settings
@@ -16,11 +16,7 @@ class LostItemService:
     async def create_lost_item(self, item: LostItemCreate) -> str:
         """Create a new lost item"""
         try:
-            if not is_connected():
-                raise ConnectionError("Database connection not available")
-                
-            database = get_database()
-            collection = database[self.collection_name]
+            collection = mongodb.database[self.collection_name]
             
             # Prepare document
             document = item.model_dump()
@@ -45,17 +41,13 @@ class LostItemService:
     async def get_lost_items(self, filters: LostItemFilters) -> List[LostItemResponse]:
         """Get lost items with optional filters"""
         try:
-            if not is_connected():
-                raise ConnectionError("Database connection not available")
-            
             # Check cache first
             cache_key_params = filters.model_dump()
             cached_result = cache_service.get("lost_items", **cache_key_params)
             if cached_result:
                 return [LostItemResponse(**item) for item in cached_result]
             
-            database = get_database()
-            collection = database[self.collection_name]
+            collection = mongodb.database[self.collection_name]
             
             # Build query
             query = {}
@@ -101,16 +93,12 @@ class LostItemService:
     async def get_lost_item_by_id(self, item_id: str) -> Optional[LostItemResponse]:
         """Get a specific lost item by ID"""
         try:
-            if not is_connected():
-                raise ConnectionError("Database connection not available")
-            
             # Check cache first
             cached_result = cache_service.get("lost_item", id=item_id)
             if cached_result:
                 return LostItemResponse(**cached_result)
             
-            database = get_database()
-            collection = database[self.collection_name]
+            collection = mongodb.database[self.collection_name]
             
             # Validate ObjectId
             if not ObjectId.is_valid(item_id):
@@ -137,17 +125,13 @@ class LostItemService:
     async def get_items_near_location(self, longitude: float, latitude: float, radius_km: float = 10) -> List[LostItemResponse]:
         """Get items near a specific location"""
         try:
-            if not is_connected():
-                raise ConnectionError("Database connection not available")
-            
             # Check cache first
             cache_key_params = {"lng": longitude, "lat": latitude, "radius": radius_km}
             cached_result = cache_service.get("nearby_items", **cache_key_params)
             if cached_result:
                 return [LostItemResponse(**item) for item in cached_result]
             
-            database = get_database()
-            collection = database[self.collection_name]
+            collection = mongodb.database[self.collection_name]
             
             # Geospatial query for nearby items
             query = {

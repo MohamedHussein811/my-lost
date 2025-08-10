@@ -14,23 +14,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
     logger.info("Starting My Lost API...")
-    try:
-        await connect_to_mongo()
-        logger.info("My Lost API started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start My Lost API: {e}")
-        # Don't raise here to allow the app to start even if DB is unavailable
-        # The services will handle the connection state
+    await connect_to_mongo()
+    logger.info("My Lost API started successfully")
     
     yield
     
     # Shutdown
     logger.info("Shutting down My Lost API...")
-    try:
-        await close_mongo_connection()
-        logger.info("My Lost API shut down successfully")
-    except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+    await close_mongo_connection()
+    logger.info("My Lost API shut down successfully")
 
 # Create FastAPI app
 app = FastAPI(
@@ -59,21 +51,6 @@ async def root():
         "message": "Welcome to My Lost API",
         "version": "1.0.0",
         "docs": "/docs"
-    }
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    from database.mongodb import is_connected
-    from config.settings import settings
-    
-    db_status = "connected" if is_connected() else "disconnected"
-    
-    return {
-        "status": "healthy",
-        "database": db_status,
-        "mongodb_url_configured": bool(settings.mongodb_url),
-        "database_name_configured": bool(settings.database_name)
     }
 
 if __name__ == "__main__":

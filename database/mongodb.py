@@ -8,34 +8,23 @@ logger = logging.getLogger(__name__)
 class MongoDB:
     client: AsyncIOMotorClient = None
     database = None
-    _is_connected = False
 
 mongodb = MongoDB()
 
 async def connect_to_mongo():
     """Create database connection"""
     try:
-        if not settings.mongodb_url:
-            logger.error("MONGODB_URL environment variable is not set")
-            raise ValueError("MONGODB_URL is required")
-        
-        if not settings.database_name:
-            logger.error("DATABASE_NAME environment variable is not set")
-            raise ValueError("DATABASE_NAME is required")
-        
         mongodb.client = AsyncIOMotorClient(settings.mongodb_url)
         mongodb.database = mongodb.client[settings.database_name]
         
         # Test connection
         await mongodb.client.admin.command('ping')
-        mongodb._is_connected = True
         logger.info("Connected to MongoDB successfully")
         
         # Create indexes
         await create_indexes()
         
     except Exception as e:
-        mongodb._is_connected = False
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
 
@@ -43,18 +32,7 @@ async def close_mongo_connection():
     """Close database connection"""
     if mongodb.client:
         mongodb.client.close()
-        mongodb._is_connected = False
         logger.info("Disconnected from MongoDB")
-
-def is_connected() -> bool:
-    """Check if database is connected"""
-    return mongodb._is_connected and mongodb.database is not None
-
-def get_database():
-    """Get database instance with connection check"""
-    if not is_connected():
-        raise ConnectionError("Database is not connected. Please ensure MongoDB connection is established.")
-    return mongodb.database
 
 async def create_indexes():
     """Create database indexes for better performance"""
