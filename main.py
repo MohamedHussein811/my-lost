@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import os
-from database.mongodb import connect_to_mongo, close_mongo_connection, is_connected
+from database.mongodb import close_mongo_connection
 from api.routes import lost_items
 
 # Configure logging
