@@ -3,13 +3,14 @@ from datetime import datetime, timedelta
 from database.mongodb import DatabaseManager
 import os
 import logging
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 class RateLimitService:
     def __init__(self):
-        self.rate_limit_collection = os.getenv("RATE_LIMIT_COLLECTION", "rate_limits")
-        self.max_posts_per_day = int(os.getenv("MAX_POSTS_PER_DAY", "10"))
+        self.rate_limit_collection = settings.rate_limit_collection
+        self.max_posts_per_day = settings.max_posts_per_day
     
     async def check_rate_limit(self, user_id: str) -> bool:
         """Check if user has exceeded daily post limit"""

@@ -5,14 +5,14 @@ from bson import ObjectId
 from database.mongodb import DatabaseManager
 from models.lost_item import LostItemCreate, LostItemResponse, LostItemFilters
 from services.cache_service import cache_service
-import os
 import logging
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 class LostItemService:
     def __init__(self):
-        self.collection_name = os.getenv("COLLECTION_NAME", "items")
+        self.collection_name = settings.collection_name
     
     async def create_lost_item(self, item: LostItemCreate) -> str:
         """Create a new lost item"""
