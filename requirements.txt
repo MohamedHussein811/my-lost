@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 pymongo
-motor
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
@@ -9,3 +8,4 @@ email-validator
 cachetools
 pydantic-settings
 geopy
+pymongo[srv]

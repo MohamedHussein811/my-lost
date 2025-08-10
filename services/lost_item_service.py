@@ -1,17 +1,18 @@
+# services/lost_item_service.py
 from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
 from database.mongodb import get_database
 from models.lost_item import LostItemCreate, LostItemResponse, LostItemFilters
 from services.cache_service import cache_service
-from config.settings import settings
+import os
 import logging
 
 logger = logging.getLogger(__name__)
 
 class LostItemService:
     def __init__(self):
-        self.collection_name = settings.collection_name
+        self.collection_name = os.getenv("COLLECTION_NAME", "items")
     
     async def create_lost_item(self, item: LostItemCreate) -> str:
         """Create a new lost item"""
@@ -77,7 +78,7 @@ class LostItemService:
             # Execute query with pagination
             cursor = collection.find(query).skip(filters.skip).limit(filters.limit).sort("created_at", -1)
             
-            # Convert to list
+            # Convert to list - PyMongo Async uses async iteration
             items = []
             async for doc in cursor:
                 doc["_id"] = str(doc["_id"])

@@ -1,16 +1,21 @@
+# services/rate_limit_service.py
 from datetime import datetime, timedelta
 from database.mongodb import get_database
-from config.settings import settings
+import os
 import logging
 
 logger = logging.getLogger(__name__)
 
 class RateLimitService:
+    def __init__(self):
+        self.rate_limit_collection = os.getenv("RATE_LIMIT_COLLECTION", "rate_limits")
+        self.max_posts_per_day = int(os.getenv("MAX_POSTS_PER_DAY", "10"))
+    
     async def check_rate_limit(self, user_id: str) -> bool:
         """Check if user has exceeded daily post limit"""
         try:
             database = await get_database()
-            collection = database[settings.rate_limit_collection]
+            collection = database[self.rate_limit_collection]
             
             # Get today's date range
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -22,7 +27,7 @@ class RateLimitService:
                 "created_at": {"$gte": today, "$lt": tomorrow}
             })
             
-            return post_count < settings.max_posts_per_day
+            return post_count < self.max_posts_per_day
             
         except Exception as e:
             logger.error(f"Rate limit check failed: {e}")
@@ -33,7 +38,7 @@ class RateLimitService:
         """Record a post for rate limiting"""
         try:
             database = await get_database()
-            collection = database[settings.rate_limit_collection]
+            collection = database[self.rate_limit_collection]
             
             await collection.insert_one({
                 "user_id": user_id,
