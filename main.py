@@ -59,53 +59,6 @@ async def root():
         "docs": "/docs"
     }
 
-@app.get("/debug/connection")
-async def debug_connection():
-    """Debug endpoint to test MongoDB connection in detail"""
-    import traceback
-    from config.settings import settings
-    
-    debug_info = {
-        "environment_variables": {
-            "MONGODB_URL_configured": bool(os.environ.get("MONGODB_URL")),
-            "DATABASE_NAME_configured": bool(os.environ.get("DATABASE_NAME")),
-            "MONGODB_URL_length": len(os.environ.get("MONGODB_URL", "")),
-            "DATABASE_NAME": os.environ.get("DATABASE_NAME", "NOT_SET")
-        },
-        "settings": {
-            "mongodb_url_length": len(settings.mongodb_url) if settings.mongodb_url else 0,
-            "database_name": settings.database_name
-        }
-    }
-    
-    # Test connection step by step
-    try:
-        from database.mongodb import connect_to_mongo, mongodb
-        
-        logger.info("Debug: Starting connection test...")
-        await connect_to_mongo()
-        debug_info["connection_test"] = "SUCCESS"
-        
-        # Test ping
-        if mongodb.database is not None:
-            await mongodb.database.command('ping')
-            debug_info["ping_test"] = "SUCCESS"
-            
-            # Test collection access
-            collection = mongodb.database[settings.collection_name]
-            count = await collection.estimated_document_count()
-            debug_info["collection_access"] = f"SUCCESS - {count} documents"
-        else:
-            debug_info["ping_test"] = "FAILED - No database object"
-            
-    except Exception as e:
-        debug_info["connection_test"] = f"FAILED: {str(e)}"
-        debug_info["error_type"] = type(e).__name__
-        debug_info["traceback"] = traceback.format_exc()
-        logger.error(f"Debug connection failed: {e}")
-    
-    return debug_info
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint with better error handling"""

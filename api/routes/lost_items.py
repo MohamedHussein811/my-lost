@@ -3,7 +3,6 @@ from typing import List, Optional
 from models.lost_item import LostItemCreate, LostItemResponse, LostItemFilters
 from services.lost_item_service import lost_item_service
 from services.rate_limit_service import rate_limit_service
-from database.mongodb import is_connected
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,10 +32,6 @@ async def create_lost_item(
 ):
     """Create a new lost item post"""
     try:
-        # Check if database is connected
-        if not is_connected():
-            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
-        
         # Check rate limit
         can_post = await rate_limit_service.check_rate_limit(user_id)
         if not can_post:
@@ -75,10 +70,6 @@ async def get_lost_items(
 ):
     """Get lost items with optional filters"""
     try:
-        # Check if database is connected
-        if not is_connected():
-            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
-        
         # Validate region bounds
         region_bounds = None
         if any([min_lat, max_lat, min_lng, max_lng]):
@@ -118,10 +109,6 @@ async def get_lost_items(
 async def get_lost_item(item_id: str):
     """Get a specific lost item by ID"""
     try:
-        # Check if database is connected
-        if not is_connected():
-            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
-        
         item = await lost_item_service.get_lost_item_by_id(item_id)
         
         if not item:
@@ -143,10 +130,6 @@ async def get_nearby_items(
 ):
     """Get lost items near a specific location"""
     try:
-        # Check if database is connected
-        if not is_connected():
-            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
-        
         items = await lost_item_service.get_items_near_location(longitude, latitude, radius)
         return items
         
