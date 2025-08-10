@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+# main.py
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
-from database.mongodb import connect_to_mongo, close_mongo_connection
+import os
+from database.mongodb import connect_to_mongo, close_mongo_connection, is_connected
 from api.routes import lost_items
 
 # Configure logging
@@ -11,16 +13,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
+    """Application lifespan manager - simplified for serverless"""
     # Startup
     logger.info("Starting My Lost API...")
-    try:
-        await connect_to_mongo()
-        logger.info("My Lost API started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start My Lost API: {e}")
-        # Don't raise here to allow the app to start even if DB is unavailable
-        # The services will handle the connection state
+    
+    # Don't try to connect here in serverless - connect on-demand instead
+    logger.info("My Lost API started (serverless mode)")
     
     yield
     
@@ -61,71 +59,100 @@ async def root():
         "docs": "/docs"
     }
 
+@app.get("/debug/connection")
+async def debug_connection():
+    """Debug endpoint to test MongoDB connection in detail"""
+    import traceback
+    from config.settings import settings
+    
+    debug_info = {
+        "environment_variables": {
+            "MONGODB_URL_configured": bool(os.environ.get("MONGODB_URL")),
+            "DATABASE_NAME_configured": bool(os.environ.get("DATABASE_NAME")),
+            "MONGODB_URL_length": len(os.environ.get("MONGODB_URL", "")),
+            "DATABASE_NAME": os.environ.get("DATABASE_NAME", "NOT_SET")
+        },
+        "settings": {
+            "mongodb_url_length": len(settings.mongodb_url) if settings.mongodb_url else 0,
+            "database_name": settings.database_name
+        }
+    }
+    
+    # Test connection step by step
+    try:
+        from database.mongodb import connect_to_mongo, mongodb
+        
+        logger.info("Debug: Starting connection test...")
+        await connect_to_mongo()
+        debug_info["connection_test"] = "SUCCESS"
+        
+        # Test ping
+        if mongodb.database:
+            await mongodb.database.command('ping')
+            debug_info["ping_test"] = "SUCCESS"
+            
+            # Test collection access
+            collection = mongodb.database[settings.collection_name]
+            count = await collection.estimated_document_count()
+            debug_info["collection_access"] = f"SUCCESS - {count} documents"
+        else:
+            debug_info["ping_test"] = "FAILED - No database object"
+            
+    except Exception as e:
+        debug_info["connection_test"] = f"FAILED: {str(e)}"
+        debug_info["error_type"] = type(e).__name__
+        debug_info["traceback"] = traceback.format_exc()
+        logger.error(f"Debug connection failed: {e}")
+    
+    return debug_info
+
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    from database.mongodb import is_connected
-    from config.settings import settings
-    
-    db_status = "connected" if is_connected() else "disconnected"
-    
-    # Test MongoDB connection if not connected
-    connection_error = None
-    if not is_connected():
-        try:
-            from motor.motor_asyncio import AsyncIOMotorClient
-            client = AsyncIOMotorClient(settings.mongodb_url)
-            await client.admin.command('ping')
-            await client.close()
-            connection_error = "Connection test passed but status shows disconnected"
-        except Exception as e:
-            connection_error = str(e)
-    
-    return {
-        "status": "healthy",
-        "database": db_status,
-        "mongodb_url_configured": bool(settings.mongodb_url),
-        "database_name_configured": bool(settings.database_name),
-        "mongodb_url_length": len(settings.mongodb_url) if settings.mongodb_url else 0,
-        "database_name": settings.database_name,
-        "connection_error": connection_error
-    }
-
-@app.get("/test-connection")
-async def test_connection():
-    """Test MongoDB connection directly"""
-    from motor.motor_asyncio import AsyncIOMotorClient
-    from config.settings import settings
-    
+    """Health check endpoint with better error handling"""
     try:
-        logger.info("Testing MongoDB connection directly...")
-        client = AsyncIOMotorClient(settings.mongodb_url)
+        from database.mongodb import get_database
+        from config.settings import settings
         
-        # Test basic connection
-        await client.admin.command('ping')
+        # Check environment variables
+        mongodb_url_configured = bool(os.environ.get("MONGODB_URL"))
+        database_name_configured = bool(os.environ.get("DATABASE_NAME"))
         
-        # Test database access
-        db = client[settings.database_name]
-        collections = await db.list_collection_names()
-        
-        await client.close()
-        
-        return {
-            "status": "success",
-            "message": "MongoDB connection successful",
-            "database_name": settings.database_name,
-            "collections": collections
+        result = {
+            "status": "healthy",
+            "mongodb_url_configured": mongodb_url_configured,
+            "database_name_configured": database_name_configured,
+            "mongodb_url_length": len(os.environ.get("MONGODB_URL", "")),
+            "database_name": os.environ.get("DATABASE_NAME", "NOT_SET"),
+            "environment": os.environ.get("VERCEL_ENV", "local")
         }
+        
+        # Test database connection
+        try:
+            db = await get_database()
+            if db is None:
+                result["database"] = "disconnected"
+                result["connection_error"] = "get_database returned None"
+            else:
+                await db.command('ping')
+                result["database"] = "connected"
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            result["database"] = "disconnected"
+            result["connection_error"] = str(e)[:200]  # Truncate long error messages
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Direct connection test failed: {e}")
-        return {
-            "status": "error",
-            "message": "MongoDB connection failed",
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
+# For local development
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

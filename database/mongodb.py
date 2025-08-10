@@ -1,19 +1,42 @@
+# database/mongodb.py
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import IndexModel, GEOSPHERE, TEXT
 from config.settings import settings
 import logging
+import asyncio
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 class MongoDB:
-    client: AsyncIOMotorClient = None
-    database = None
-    _is_connected = False
+    def __init__(self):
+        self.client: Optional[AsyncIOMotorClient] = None
+        self.database = None
+        self._is_connected = False
+        self._connection_lock = asyncio.Lock()
 
 mongodb = MongoDB()
 
+async def get_database():
+    """Get database instance with automatic connection handling for serverless"""
+    try:
+        if not mongodb._is_connected or mongodb.database is None:
+            async with mongodb._connection_lock:
+                # Double-check after acquiring lock
+                if not mongodb._is_connected or mongodb.database is None:
+                    await connect_to_mongo()
+        
+        if not mongodb.database:
+            raise ConnectionError("Database connection failed - database is None")
+        
+        return mongodb.database
+        
+    except Exception as e:
+        logger.error(f"get_database failed: {e}")
+        raise ConnectionError(f"Database service temporarily unavailable: {str(e)}")
+
 async def connect_to_mongo():
-    """Create database connection"""
+    """Create database connection with better error handling"""
     try:
         if not settings.mongodb_url:
             logger.error("MONGODB_URL environment variable is not set")
@@ -23,75 +46,150 @@ async def connect_to_mongo():
             logger.error("DATABASE_NAME environment variable is not set")
             raise ValueError("DATABASE_NAME is required")
         
-        logger.info(f"Attempting to connect to MongoDB...")
+        # Log connection attempt (mask sensitive info)
+        masked_url = settings.mongodb_url[:20] + "***" + settings.mongodb_url[-10:] if len(settings.mongodb_url) > 30 else "***"
+        logger.info(f"Attempting to connect to MongoDB: {masked_url}")
         logger.info(f"Database name: {settings.database_name}")
-        logger.info(f"MongoDB URL (masked): {settings.mongodb_url[:20]}...")
         
-        mongodb.client = AsyncIOMotorClient(settings.mongodb_url)
+        # Close existing connection if any
+        if mongodb.client:
+            mongodb.client.close()
+        
+        # Create new connection with serverless-friendly settings
+        mongodb.client = AsyncIOMotorClient(
+            settings.mongodb_url,
+            serverSelectionTimeoutMS=10000,  # Increased to 10 seconds
+            connectTimeoutMS=10000,          # Increased to 10 seconds
+            socketTimeoutMS=10000,           # Add socket timeout
+            maxPoolSize=1,                   # Limit connection pool for serverless
+            minPoolSize=0,                   # Allow pool to be empty
+            maxIdleTimeMS=30000,            # Close connections after 30s idle
+            retryWrites=True,
+            retryReads=True
+        )
+        
         mongodb.database = mongodb.client[settings.database_name]
         
-        # Test connection with timeout
+        # Test connection with increased timeout
         logger.info("Testing MongoDB connection...")
-        await mongodb.client.admin.command('ping')
+        ping_result = await asyncio.wait_for(
+            mongodb.client.admin.command('ping'), 
+            timeout=15.0
+        )
+        logger.info(f"MongoDB ping result: {ping_result}")
+        
+        if not ping_result or not ping_result.get('ok'):
+            raise ConnectionError("MongoDB ping failed - server not responding properly")
+        
         mongodb._is_connected = True
         logger.info("Connected to MongoDB successfully")
         
-        # Create indexes
-        logger.info("Creating database indexes...")
-        await create_indexes()
-        logger.info("Database indexes created successfully")
+        # Test database access
+        try:
+            collections = await mongodb.database.list_collection_names()
+            logger.info(f"Database accessible, collections: {len(collections)}")
+        except Exception as e:
+            logger.warning(f"Could not list collections (non-critical): {e}")
         
+        # Create indexes (but don't fail if this fails)
+        try:
+            await create_indexes()
+        except Exception as e:
+            logger.warning(f"Failed to create indexes (non-critical): {e}")
+        
+    except asyncio.TimeoutError:
+        mongodb._is_connected = False
+        error_msg = "MongoDB connection timed out - check network connectivity and MongoDB Atlas IP whitelist"
+        logger.error(error_msg)
+        raise ConnectionError(error_msg)
     except Exception as e:
         mongodb._is_connected = False
-        logger.error(f"Failed to connect to MongoDB: {e}")
-        logger.error(f"Error type: {type(e).__name__}")
-        # Log more details for common MongoDB connection issues
-        if "authentication" in str(e).lower():
-            logger.error("This appears to be an authentication issue. Check your MongoDB username/password.")
-        elif "timeout" in str(e).lower():
-            logger.error("This appears to be a network timeout. Check your MongoDB URL and network connectivity.")
-        elif "dns" in str(e).lower():
-            logger.error("This appears to be a DNS resolution issue. Check your MongoDB URL format.")
-        raise
+        error_msg = f"Failed to connect to MongoDB: {type(e).__name__}: {str(e)}"
+        logger.error(error_msg)
+        
+        # Provide specific guidance for common errors
+        if "authentication failed" in str(e).lower():
+            error_msg += " - Check username/password in connection string"
+        elif "network" in str(e).lower() or "timeout" in str(e).lower():
+            error_msg += " - Check MongoDB Atlas IP whitelist (should include 0.0.0.0/0)"
+        elif "ssl" in str(e).lower():
+            error_msg += " - Check SSL/TLS configuration"
+        
+        raise ConnectionError(error_msg)
 
 async def close_mongo_connection():
     """Close database connection"""
     if mongodb.client:
         mongodb.client.close()
         mongodb._is_connected = False
+        mongodb.client = None
+        mongodb.database = None
         logger.info("Disconnected from MongoDB")
 
 def is_connected() -> bool:
     """Check if database is connected"""
     return mongodb._is_connected and mongodb.database is not None
 
-def get_database():
-    """Get database instance with connection check"""
-    if not is_connected():
-        raise ConnectionError("Database is not connected. Please ensure MongoDB connection is established.")
-    return mongodb.database
-
 async def create_indexes():
     """Create database indexes for better performance"""
+    if not mongodb.database:
+        return
+        
     collection = mongodb.database[settings.collection_name]
     rate_limit_collection = mongodb.database[settings.rate_limit_collection]
     
-    # Geospatial index for location queries
-    await collection.create_index([("location", GEOSPHERE)])
-    
-    # Text index for search functionality
-    await collection.create_index([
-        ("description", TEXT),
-        ("notes", TEXT),
-        ("found_at_address", TEXT)
-    ])
-    
-    # Category index
-    await collection.create_index("category")
-    
-    # Created at index for sorting
-    await collection.create_index("created_at")
-    
-    # Rate limiting indexes
-    await rate_limit_collection.create_index("user_id")
-    await rate_limit_collection.create_index("created_at", expireAfterSeconds=86400)  # 24 hours TTL
+    try:
+        # Create indexes with timeout
+        await asyncio.wait_for(
+            collection.create_index([("location", GEOSPHERE)]),
+            timeout=10.0
+        )
+        
+        await asyncio.wait_for(
+            collection.create_index([
+                ("description", TEXT),
+                ("notes", TEXT),
+                ("found_at_address", TEXT)
+            ]),
+            timeout=10.0
+        )
+        
+        await asyncio.wait_for(
+            collection.create_index("category"),
+            timeout=10.0
+        )
+        
+        await asyncio.wait_for(
+            collection.create_index("created_at"),
+            timeout=10.0
+        )
+        
+        # Rate limiting indexes
+        await asyncio.wait_for(
+            rate_limit_collection.create_index("user_id"),
+            timeout=10.0
+        )
+        
+        await asyncio.wait_for(
+            rate_limit_collection.create_index("created_at", expireAfterSeconds=86400),
+            timeout=10.0
+        )
+        
+        logger.info("Database indexes created successfully")
+        
+    except asyncio.TimeoutError:
+        logger.warning("Index creation timed out (non-critical)")
+    except Exception as e:
+        logger.warning(f"Failed to create some indexes (non-critical): {e}")
+
+# Dependency for FastAPI routes
+async def get_db():
+    """FastAPI dependency to get database connection"""
+    try:
+        db = await get_database()
+        if db is None:
+            raise ConnectionError("Database connection returned None")
+        return db
+    except Exception as e:
+        logger.error(f"Database dependency failed: {e}")
+        raise ConnectionError(f"Database service temporarily unavailable: {str(e)}")
