@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from database.mongodb import mongodb
+from database.mongodb import get_database, is_connected
 from config.settings import settings
 import logging
 
@@ -9,7 +9,12 @@ class RateLimitService:
     async def check_rate_limit(self, user_id: str) -> bool:
         """Check if user has exceeded daily post limit"""
         try:
-            collection = mongodb.database[settings.rate_limit_collection]
+            if not is_connected():
+                logger.warning("Database connection not available, allowing rate limit check to pass")
+                return True
+                
+            database = get_database()
+            collection = database[settings.rate_limit_collection]
             
             # Get today's date range
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -25,12 +30,18 @@ class RateLimitService:
             
         except Exception as e:
             logger.error(f"Rate limit check failed: {e}")
-            return False
+            # Allow the request to proceed if rate limiting fails
+            return True
     
     async def record_post(self, user_id: str) -> None:
         """Record a post for rate limiting"""
         try:
-            collection = mongodb.database[settings.rate_limit_collection]
+            if not is_connected():
+                logger.warning("Database connection not available, skipping rate limit recording")
+                return
+                
+            database = get_database()
+            collection = database[settings.rate_limit_collection]
             
             await collection.insert_one({
                 "user_id": user_id,
