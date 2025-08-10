@@ -87,7 +87,7 @@ async def debug_connection():
         debug_info["connection_test"] = "SUCCESS"
         
         # Test ping
-        if mongodb.database:
+        if mongodb.database is not None:
             await mongodb.database.command('ping')
             debug_info["ping_test"] = "SUCCESS"
             

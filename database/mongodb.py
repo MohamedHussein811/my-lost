@@ -26,7 +26,7 @@ async def get_database():
                 if not mongodb._is_connected or mongodb.database is None:
                     await connect_to_mongo()
         
-        if not mongodb.database:
+        if mongodb.database is None:
             raise ConnectionError("Database connection failed - database is None")
         
         return mongodb.database
@@ -132,7 +132,7 @@ def is_connected() -> bool:
 
 async def create_indexes():
     """Create database indexes for better performance"""
-    if not mongodb.database:
+    if mongodb.database is None:
         return
         
     collection = mongodb.database[settings.collection_name]
