@@ -66,20 +66,9 @@ Open your browser and go to:
 
 ### MongoDB Setup Options
 
-#### Local MongoDB
+#### MongoDB URL
 ```env
-MONGODB_URL=mongodb://localhost:27017
-```
-
-#### MongoDB Atlas (Cloud)
-```env
-MONGODB_URL=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
-```
-
-#### MongoDB with Authentication
-```env
-MONGODB_URL=mongodb://username:password@localhost:27017/dbname
-```
+MONGODB_URL=your_mongodb_url
 
 ## 📖 Simple Usage
 
