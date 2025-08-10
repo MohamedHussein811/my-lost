@@ -13,7 +13,20 @@ class MongoDB:
         self.client: Optional[AsyncIOMotorClient] = None
         self.database = None
         self._is_connected = False
-        self._connection_lock = asyncio.Lock()
+        # Do not bind an asyncio.Lock to a potentially different/closed loop at import time
+        # Create the lock lazily per current running loop
+        self._connection_lock = None
+        self._lock_loop_id = None
+
+    def _get_connection_lock(self) -> asyncio.Lock:
+        """Return an asyncio.Lock bound to the current running loop.
+        This avoids cross-event-loop issues like 'Event loop is closed'.
+        """
+        current_loop = asyncio.get_running_loop()
+        if self._connection_lock is None or self._lock_loop_id != id(current_loop):
+            self._connection_lock = asyncio.Lock()
+            self._lock_loop_id = id(current_loop)
+        return self._connection_lock
 
 mongodb = MongoDB()
 
@@ -21,7 +34,7 @@ async def get_database():
     """Get database instance with automatic connection handling for serverless"""
     try:
         if not mongodb._is_connected or mongodb.database is None:
-            async with mongodb._connection_lock:
+            async with mongodb._get_connection_lock():
                 # Double-check after acquiring lock
                 if not mongodb._is_connected or mongodb.database is None:
                     await connect_to_mongo()
@@ -125,6 +138,9 @@ async def close_mongo_connection():
         mongodb.client = None
         mongodb.database = None
         logger.info("Disconnected from MongoDB")
+        # Reset lock so a fresh one will be created for the next loop
+        mongodb._connection_lock = None
+        mongodb._lock_loop_id = None
 
 def is_connected() -> bool:
     """Check if database is connected"""
