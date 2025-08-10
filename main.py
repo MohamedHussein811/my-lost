@@ -69,19 +69,63 @@ async def health_check():
     
     db_status = "connected" if is_connected() else "disconnected"
     
+    # Test MongoDB connection if not connected
+    connection_error = None
+    if not is_connected():
+        try:
+            from motor.motor_asyncio import AsyncIOMotorClient
+            client = AsyncIOMotorClient(settings.mongodb_url)
+            await client.admin.command('ping')
+            await client.close()
+            connection_error = "Connection test passed but status shows disconnected"
+        except Exception as e:
+            connection_error = str(e)
+    
     return {
         "status": "healthy",
         "database": db_status,
         "mongodb_url_configured": bool(settings.mongodb_url),
-        "database_name_configured": bool(settings.database_name)
+        "database_name_configured": bool(settings.database_name),
+        "mongodb_url_length": len(settings.mongodb_url) if settings.mongodb_url else 0,
+        "database_name": settings.database_name,
+        "connection_error": connection_error
     }
+
+@app.get("/test-connection")
+async def test_connection():
+    """Test MongoDB connection directly"""
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from config.settings import settings
+    
+    try:
+        logger.info("Testing MongoDB connection directly...")
+        client = AsyncIOMotorClient(settings.mongodb_url)
+        
+        # Test basic connection
+        await client.admin.command('ping')
+        
+        # Test database access
+        db = client[settings.database_name]
+        collections = await db.list_collection_names()
+        
+        await client.close()
+        
+        return {
+            "status": "success",
+            "message": "MongoDB connection successful",
+            "database_name": settings.database_name,
+            "collections": collections
+        }
+        
+    except Exception as e:
+        logger.error(f"Direct connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": "MongoDB connection failed",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)

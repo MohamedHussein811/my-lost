@@ -23,20 +23,35 @@ async def connect_to_mongo():
             logger.error("DATABASE_NAME environment variable is not set")
             raise ValueError("DATABASE_NAME is required")
         
+        logger.info(f"Attempting to connect to MongoDB...")
+        logger.info(f"Database name: {settings.database_name}")
+        logger.info(f"MongoDB URL (masked): {settings.mongodb_url[:20]}...")
+        
         mongodb.client = AsyncIOMotorClient(settings.mongodb_url)
         mongodb.database = mongodb.client[settings.database_name]
         
-        # Test connection
+        # Test connection with timeout
+        logger.info("Testing MongoDB connection...")
         await mongodb.client.admin.command('ping')
         mongodb._is_connected = True
         logger.info("Connected to MongoDB successfully")
         
         # Create indexes
+        logger.info("Creating database indexes...")
         await create_indexes()
+        logger.info("Database indexes created successfully")
         
     except Exception as e:
         mongodb._is_connected = False
         logger.error(f"Failed to connect to MongoDB: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        # Log more details for common MongoDB connection issues
+        if "authentication" in str(e).lower():
+            logger.error("This appears to be an authentication issue. Check your MongoDB username/password.")
+        elif "timeout" in str(e).lower():
+            logger.error("This appears to be a network timeout. Check your MongoDB URL and network connectivity.")
+        elif "dns" in str(e).lower():
+            logger.error("This appears to be a DNS resolution issue. Check your MongoDB URL format.")
         raise
 
 async def close_mongo_connection():
